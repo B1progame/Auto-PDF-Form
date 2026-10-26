@@ -1,0 +1,17 @@
+.build/
+.build-cache/
+__pycache__/
+.pytest_cache/
+.test-work*/
+*.py[cod]
+validation/
+release/portable/PDFFormStudio/
+release/standalone/PDFFormStudio.exe
+release/installer/*.exe
+release/source/*.zip
+release/portable/*.zip
+release/licenses/
+*.spec
+build*.log
+package*.log
+/release/*
