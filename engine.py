@@ -25,7 +25,7 @@ from pypdf.generic import (
     DictionaryObject, FloatObject, NameObject, NumberObject, TextStringObject,
 )
 
-VERSION = '1.0.0'
+VERSION = '1.1.0'
 PDFIUM_LOCK = threading.Lock()  # PDFium is not safe for concurrent calls.
 FONT_ASCENT = {'Helvetica': 718, 'Times-Roman': 683, 'Courier': 629}
 
@@ -38,7 +38,7 @@ class Field:
     rect: list[float]
     kind: str = 'text'
     value: str = ''
-    font_size: float = 12.0
+    font_size: float = 14.0
     font: str = 'Helvetica'
     text_color: str = '#17212f'
     background: str | None = None
@@ -53,10 +53,28 @@ class Field:
     tooltip: str = ''
     choices: list[str] = field(default_factory=list)
     alignment: int = 0
+    locked: bool = False
+    linked_fields: list[str] = field(default_factory=list)
 
     @classmethod
     def make(cls, name, page, rect, **kwargs):
         return cls(uuid.uuid4().hex, name, page, list(map(float, rect)), **kwargs)
+
+
+@dataclass
+class Rewrite:
+    key: str
+    page: int
+    rect: list[float]
+    text: str = ''
+    font_size: float = 14.0
+    font: str = 'Helvetica'
+    text_color: str = '#17212f'
+    fill: str = '#ffffff'
+
+    @classmethod
+    def make(cls, page, rect, **kwargs):
+        return cls(uuid.uuid4().hex, page, list(map(float, rect)), **kwargs)
 
 
 @dataclass
@@ -67,6 +85,7 @@ class Document:
     fields: list[Field]
     warnings: list[str] = field(default_factory=list)
     unsupported: list[str] = field(default_factory=list)
+    rewrites: list[Rewrite] = field(default_factory=list)
 
 
 @dataclass
@@ -220,6 +239,7 @@ def load_project(path):
         raise ValueError('The original PDF changed since this project was saved. Open the PDF as a new document.')
     doc['source'] = str(source.resolve())
     doc['fields'] = [Field(**f) for f in doc['fields']]
+    doc['rewrites'] = [Rewrite(**item) for item in doc.get('rewrites', [])]
     return Document(**doc)
 
 
@@ -328,13 +348,14 @@ def _detect(page, index):
     return anchors,boxes,labels,cells
 
 
-def analyze(document: Document, discover: bool | None=None, prefer_template: bool=True):
+def analyze(document: Document, discover: bool | None=None, prefer_template: bool=True, pages: set[int] | None=None):
     """Return an edited copy and an auditable change report; no PDF is written."""
     result=copy.deepcopy(document)
     if result.unsupported:
         raise ValueError('\n'.join(result.unsupported))
-    report={'version':VERSION,'source':document.source,'changes':[],'review':[], 'pages':len(document.sizes)}
-    if not result.fields and prefer_template:
+    scope=set(range(len(document.sizes))) if pages is None else {i for i in pages if 0 <= i < len(document.sizes)}
+    report={'version':VERSION,'source':document.source,'changes':[],'review':[], 'pages':len(scope),'scope_pages':sorted(i+1 for i in scope)}
+    if not result.fields and prefer_template and pages is None:
         source=Path(document.source);sibling=source.with_name(source.stem+'_fillable.pdf')
         if sibling.exists() and sibling.resolve()!=source.resolve():
             try:
@@ -346,12 +367,13 @@ def analyze(document: Document, discover: bool | None=None, prefer_template: boo
     all_anchors=[]; used=set()
     with pdfplumber.open(document.source) as pdf:
         for index,page in enumerate(pdf.pages):
+            if index not in scope:continue
             if len(page.chars)<5:
                 report['review'].append(f'Page {index+1}: no extractable text; scans need OCR or manual field placement.')
             anchors,boxes,labels,cells=_detect(page,index);all_anchors.extend(anchors)
             existing=[f for f in result.fields if f.page==index]
             for f in list(existing):
-                if f.kind not in ('text','choice') or f.multiline: continue
+                if f.kind not in ('text','choice') or f.multiline or f.locked: continue
                 x0,y0,x1,y1=f.rect; center=(y0+y1)/2
                 candidates=[]
                 for a in anchors:
@@ -386,7 +408,7 @@ def analyze(document: Document, discover: bool | None=None, prefer_template: boo
                         f.rect=new
                     used.add(id(a))
             for f in existing:
-                if f.kind not in ('radio','checkbox'):continue
+                if f.kind not in ('radio','checkbox') or f.locked:continue
                 near=[b for b in boxes if abs((b[0]+b[2]-f.rect[0]-f.rect[2])/2)<10 and abs((b[1]+b[3]-f.rect[1]-f.rect[3])/2)<10]
                 if near:
                     box=min(near,key=lambda b:sum(abs(x-y) for x,y in zip(b,f.rect)))
@@ -407,7 +429,19 @@ def analyze(document: Document, discover: bool | None=None, prefer_template: boo
                 pending.append((f,label))
             opposite={'yes':'no','no':'yes','ja':'nein','nein':'ja','male':'female','female':'male'}
             paired=set()
+            size_options={'xs','s','m','l','xl','xxl','xxxl'}
+            for i,(f,label) in enumerate(pending):
+                if label not in size_options or i in paired:continue
+                row=[(j,item,text) for j,(item,text) in enumerate(pending)
+                     if text in size_options and abs(f.rect[1]-item.rect[1])<6]
+                unique={text for _,_,text in row}
+                if len(unique)>=3:
+                    group=f'auto_p{index+1}_size_{len(result.fields)+i+1}'
+                    for _,item,text in row:
+                        item.kind='radio';item.group=group;item.name=group;item.option=text.upper()
+                    paired.update(j for j,_,_ in row)
             def partner(i):
+                if i in paired:return None
                 f,label=pending[i];best=[]
                 for j,(other,text) in enumerate(pending):
                     if j==i or text!=opposite.get(label):continue
@@ -431,6 +465,17 @@ def analyze(document: Document, discover: bool | None=None, prefer_template: boo
                 result.fields.append(Field.make(name,index,rect,multiline=rect[3]-rect[1]>32,tooltip=reason))
                 report['changes'].append({'page':index+1,'field':name,'action':'create table response field','confidence':'review','reason':reason})
     report['review'].append('Automatic detection is heuristic. Review table fields, grouping and any unmarked areas in the editor before distributing the PDF.')
+    for change in report['changes']:
+        action=change.get('action','')
+        if 'align' in action.lower() or 'split date' in action.lower():
+            change.setdefault('confidence','high')
+            change.setdefault('reason','Matched the existing field to a detected printed baseline or checkbox square.')
+        elif 'matching template' in change.get('field','').lower():
+            change.setdefault('confidence','high')
+            change.setdefault('reason','Every source page was verified against the selected template.')
+        else:
+            change.setdefault('confidence','review')
+            change.setdefault('reason','Automatic detection found a likely answer area; confirm its label and position before export.')
     report['field_widgets']=len(result.fields)
     return result,report
 
@@ -455,6 +500,27 @@ def validate_document(doc):
             if color is not None and not re.fullmatch(r'#[0-9a-fA-F]{6}',color):raise ValueError(f'{f.name}: invalid color {color}.')
         try:f.value.encode('cp1252')
         except UnicodeEncodeError:raise ValueError(f'{f.name}: this version supports Latin/Western European PDF entry text; an embedded Unicode font is needed for this value.')
+    field_keys={f.key:f for f in doc.fields}
+    for f in doc.fields:
+        if not isinstance(f.linked_fields,list) or len(set(f.linked_fields))!=len(f.linked_fields):raise ValueError(f'{f.name}: invalid linked fields.')
+        for key in f.linked_fields:
+            linked=field_keys.get(key)
+            if linked is None or linked.key==f.key or linked.kind not in ('text','choice'):
+                raise ValueError(f'{f.name}: links must point to a different text field or dropdown in this PDF.')
+    rewrite_keys=set()
+    for r in doc.rewrites:
+        if r.key in rewrite_keys:raise ValueError('Duplicate rewrite marker key.')
+        rewrite_keys.add(r.key)
+        if r.page<0 or r.page>=len(doc.sizes):raise ValueError('A text correction points to an invalid page.')
+        x0,y0,x1,y1=r.rect;pw,ph=doc.sizes[r.page]
+        if not all(math.isfinite(v) for v in r.rect) or x1-x0<3 or y1-y0<3 or x0<-.1 or y0<-.1 or x1>pw+.1 or y1>ph+.1:
+            raise ValueError('A text correction is outside its page or too small.')
+        if not 1<=r.font_size<=100:raise ValueError('Text correction size must be 1-100 points.')
+        if r.font not in ('Helvetica','Times-Roman','Courier'):raise ValueError('Unsupported text correction font.')
+        for color in (r.text_color,r.fill):
+            if not re.fullmatch(r'#[0-9a-fA-F]{6}',color):raise ValueError('Text correction colors must be six-digit hex colors.')
+        try:r.text.encode('cp1252')
+        except UnicodeEncodeError:raise ValueError('Text correction uses unsupported characters; enter Western European text.')
     for name,options in radio.items():
         if name in seen:raise ValueError(f'Radio group {name} conflicts with another field name.')
         if len({f.option for f in options})!=len(options):raise ValueError(f'Radio group {name} has duplicate option values.')
@@ -474,8 +540,15 @@ def _button_appearance(writer,f,on):
         inset=f.border_width/2
         s.append(' '.join(map(str,rgb(f.border_color)))+f' RG {f.border_width} w {inset} {inset} {width-2*inset} {height-2*inset} re S')
     if on:
-        a,b=width*.2,height*.2
-        s.append(' '.join(map(str,rgb(f.text_color)))+f' RG {max(1,min(width,height)*.12)} w 1 J {a} {b} m {width-a} {height-b} l S {a} {height-b} m {width-a} {b} l S')
+        mark=min(width,height);cx,cy=width/2,height/2
+        color=' '.join(map(str,rgb(f.text_color)))
+        if f.kind=='radio':
+            radius=mark*.22
+            k=radius*.55228475
+            s.append(f'{color} rg {cx+radius} {cy} m {cx+radius} {cy+k} {cx+k} {cy+radius} {cx} {cy+radius} c {cx-k} {cy+radius} {cx-radius} {cy+k} {cx-radius} {cy} c {cx-radius} {cy-k} {cx-k} {cy-radius} {cx} {cy-radius} c {cx+k} {cy-radius} {cx+radius} {cy-k} {cx+radius} {cy} c f')
+        else:
+            inset=mark*.28;stroke=max(.7,min(1.6,mark*.12))
+            s.append(f'{color} RG {stroke} w 1 J {inset} {inset} m {width-inset} {height-inset} l S {inset} {height-inset} m {width-inset} {inset} l S')
     s.append('Q');ap=DecodedStreamObject();ap.set_data('\n'.join(s).encode('ascii'))
     ap.update({NameObject('/Type'):NameObject('/XObject'),NameObject('/Subtype'):NameObject('/Form'),NameObject('/BBox'):_arr([0,0,width,height]),NameObject('/Resources'):DictionaryObject()})
     return writer._add_object(ap)
@@ -507,8 +580,37 @@ def export_pdf(document: Document, output: str | Path, sample=False):
     for page in writer.pages:
         page[NameObject('/Annots')]=ArrayObject([r for r in page.get('/Annots',[]) if r.get_object().get('/Subtype')!='/Widget'])
     fonts=DictionaryObject()
-    for key,font in (('/Helv','Helvetica'),('/TiRo','Times-Roman'),('/Cour','Courier')):
+    for key,font in (('/Helv','Helvetica'),('/TiRo','Times-Roman'),('/Cour','Courier'),('/FStudioHelv','Helvetica'),('/FStudioTiRo','Times-Roman'),('/FStudioCour','Courier')):
         fonts[NameObject(key)]=writer._add_object(DictionaryObject({NameObject('/Type'):NameObject('/Font'),NameObject('/Subtype'):NameObject('/Type1'),NameObject('/BaseFont'):NameObject('/'+font),NameObject('/Encoding'):NameObject('/WinAnsiEncoding')}))
+    for index,page in enumerate(writer.pages):
+        changes=[r for r in document.rewrites if r.page==index]
+        if not changes:continue
+        resources=page.get('/Resources',DictionaryObject())
+        if hasattr(resources,'get_object'):resources=resources.get_object()
+        resources=DictionaryObject(dict(resources))
+        page_fonts=resources.get('/Font',DictionaryObject())
+        if hasattr(page_fonts,'get_object'):page_fonts=page_fonts.get_object()
+        page_fonts=DictionaryObject(dict(page_fonts))
+        for font_name in ('/FStudioHelv','/FStudioTiRo','/FStudioCour'):
+            page_fonts[NameObject(font_name)]=fonts[NameObject(font_name)]
+        resources[NameObject('/Font')]=page_fonts
+        page[NameObject('/Resources')]=resources
+        commands=[]
+        for r in changes:
+            x0,y0,x1,y1=r.rect;width=x1-x0;height=y1-y0
+            font_key={'Helvetica':'/FStudioHelv','Times-Roman':'/FStudioTiRo','Courier':'/FStudioCour'}[r.font]
+            commands.extend(['q',f'{" ".join(map(str,rgb(r.fill)))} rg {x0} {y0} {width} {height} re f',f'{x0} {y0} {width} {height} re W n'])
+            baseline=y0+max(1,(height-FONT_ASCENT[r.font]*r.font_size/1000)/2)
+            commands.extend(['BT',f'{font_key} {r.font_size} Tf',f'{" ".join(map(str,rgb(r.text_color)))} rg'])
+            for line_index,line in enumerate(r.text.splitlines() or ['']):
+                encoded=line.encode('cp1252').hex().upper()
+                line_y=baseline-line_index*r.font_size*1.2
+                commands.extend([f'1 0 0 1 {x0+2} {line_y} Tm',f'<{encoded}> Tj'])
+            commands.extend(['ET','Q'])
+        stream=DecodedStreamObject();stream.set_data(('\n'.join(commands)+'\n').encode('ascii'));ref=writer._add_object(stream)
+        contents=page.get('/Contents')
+        refs=list(contents) if isinstance(contents,ArrayObject) else [contents] if contents else []
+        page[NameObject('/Contents')]=ArrayObject([*refs,ref])
     roots=ArrayObject();acro=DictionaryObject({NameObject('/Fields'):roots,NameObject('/DR'):DictionaryObject({NameObject('/Font'):fonts}),NameObject('/DA'):TextStringObject('/Helv 12 Tf 0 g'),NameObject('/NeedAppearances'):BooleanObject(False)})
     writer._root_object[NameObject('/AcroForm')]=writer._add_object(acro)
     radio_parents={};values={};expected={}
@@ -578,13 +680,14 @@ def export_pdf(document: Document, output: str | Path, sample=False):
                 name=qualified(o)
                 if str(inherited(o,'/V',''))!=str(expected[name]):raise RuntimeError('Widget value and canonical field value disagree.')
         if count!=len(document.fields):raise RuntimeError('Export widget count changed unexpectedly.')
-        for p,q in zip(reader.pages,verified.pages):
+        for index,(p,q) in enumerate(zip(reader.pages,verified.pages)):
             a=p.get_contents();b=q.get_contents()
-            if (a.get_data() if a else b'')!=(b.get_data() if b else b''):raise RuntimeError('Source page artwork changed during export.')
+            if not any(r.page==index for r in document.rewrites) and (a.get_data() if a else b'')!=(b.get_data() if b else b''):
+                raise RuntimeError('Source page artwork changed during export.')
         temp.replace(output)
     finally:
         if temp.exists():temp.unlink()
-    return {'pages':len(verified.pages),'fields':len(actual),'widgets':count,'output':str(output),'values_verified':True,'source_artwork_preserved':True}
+    return {'pages':len(verified.pages),'fields':len(actual),'widgets':count,'output':str(output),'values_verified':True,'source_artwork_preserved':not bool(document.rewrites),'rewritten_areas':len(document.rewrites)}
 
 
 def transfer_template(source_path,template_path):

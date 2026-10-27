@@ -1,5 +1,5 @@
 #define AppName "Auto PDF Form"
-#define AppVersion "1.0.0"
+#define AppVersion "1.1.0"
 #define AppPublisher "PDF Form Studio"
 #define AppExeName "PDFFormStudio.exe"
 
@@ -24,7 +24,7 @@ SolidCompression=yes
 CloseApplications=yes
 RestartApplications=no
 Uninstallable=yes
-VersionInfoVersion=1.0.0.0
+VersionInfoVersion=1.1.0.0
 VersionInfoCompany={#AppPublisher}
 VersionInfoDescription=Auto PDF Form local PDF form editor
 

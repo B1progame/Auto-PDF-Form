@@ -7,7 +7,7 @@ from pypdf import PdfReader
 from pypdf.generic import ContentStream
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from engine import Field,load_document,analyze,export_pdf,baseline_rect,render_page,save_project,load_project,transfer_template
+from engine import Field,Rewrite,load_document,analyze,export_pdf,baseline_rect,render_page,save_project,load_project,transfer_template
 
 
 @pytest.fixture
@@ -64,8 +64,10 @@ def test_non_date_content_is_never_discarded(source):
 
 def test_project_roundtrip_and_source_change(source,tmp_path):
     doc,_=analyze(load_document(source));p=tmp_path/'project.formstudio.json'
+    if len(doc.fields)>1:doc.fields[0].linked_fields=[doc.fields[1].key]
+    doc.rewrites=[Rewrite.make(0,[55,685,240,715],text='Corrected text',font='Times-Roman')]
     doc.fields[0].highlight='#ff88aa';save_project(doc,p)
-    loaded=load_project(p);assert loaded.fields==doc.fields
+    loaded=load_project(p);assert loaded.fields==doc.fields and loaded.rewrites==doc.rewrites
     source.write_bytes(source.read_bytes()+b'\n% changed')
     with pytest.raises(ValueError,match='changed'):load_project(p)
 
@@ -116,6 +118,41 @@ def test_matching_sibling_template_is_used_without_hardcoded_pages(source,tmp_pa
     assert len(matched.fields)==len(doc.fields)
 
 
+def test_page_scoped_analysis_does_not_touch_other_pages(tmp_path):
+    p=tmp_path/'two-pages.pdf';c=canvas.Canvas(str(p),pagesize=(600,800))
+    c.drawString(60,700,'Page one: __________________');c.showPage()
+    c.drawString(60,700,'Page two: __________________');c.save()
+    doc=load_document(p)
+    field=Field.make('page_two',1,[100,680,300,700]);doc.fields=[field]
+    scoped,report=analyze(doc,False,pages={0})
+    assert scoped.fields[0].rect==field.rect
+    assert report['scope_pages']==[1]
+    assert report['pages']==1
+
+
+def test_locked_fields_are_not_automatically_repositioned(source):
+    doc=load_document(source)
+    locked=Field.make('locked_name',0,[105,680,280,698],value='Keep this',locked=True)
+    doc.fields=[locked]
+    repaired,report=analyze(doc,False)
+    assert repaired.fields[0].rect==locked.rect
+    assert repaired.fields[0].value=='Keep this'
+    assert not any(change.get('field')=='locked_name' for change in report['changes'])
+
+
+def test_clothing_sizes_are_detected_as_one_exclusive_group(tmp_path):
+    p=tmp_path/'sizes.pdf';c=canvas.Canvas(str(p),pagesize=(600,800))
+    for x,label in zip((45,115,185,255,325,395,465),('XS','S','M','L','XL','XXL','XXXL')):
+        c.rect(x,500,10,10);c.drawString(x+15,500,label)
+    c.save()
+    doc,report=analyze(load_document(p),prefer_template=False)
+    options=[f for f in doc.fields if f.kind=='radio']
+    assert len(options)==7
+    assert len({f.group for f in options})==1
+    assert {f.option for f in options}=={'XS','S','M','L','XL','XXL','XXXL'}
+    assert all(change['confidence']=='review' for change in report['changes'])
+
+
 def test_table_borders_do_not_pull_existing_fields_into_other_rows(tmp_path):
     p=tmp_path/'table.pdf';c=canvas.Canvas(str(p),pagesize=(600,800))
     for y in (400,450):c.rect(250,y,200,50)
@@ -130,3 +167,34 @@ def test_german_text_survives_roundtrip(source,tmp_path):
     out=tmp_path/'umlauts.pdf';export_pdf(doc,out)
     assert PdfReader(out).get_fields()['name']['/V']=='Müller-Schröder'
     assert render_page(out,0,.5,True).size==(300,400)
+
+
+def test_text_correction_is_clipped_font_aware_and_keeps_source_untouched(source,tmp_path):
+    doc=load_document(source)
+    doc.rewrites=[Rewrite.make(0,[55,685,240,715],text='Corrected line\nSecond line',font='Times-Roman',font_size=12,fill='#ffffff')]
+    original=source.read_bytes();out=tmp_path/'corrected-copy.pdf'
+    result=export_pdf(doc,out)
+    assert source.read_bytes()==original
+    assert result['rewritten_areas']==1 and not result['source_artwork_preserved']
+    reader=PdfReader(out)
+    assert 'Corrected line' in reader.pages[0].extract_text()
+    assert 'Second line' in reader.pages[0].extract_text()
+    resources=reader.pages[0]['/Resources']['/Font']
+    assert resources['/FStudioTiRo'].get_object()['/BaseFont']=='/Times-Roman'
+    image=render_page(out,0,1,False)
+    assert image.getpixel((210,100))==(255,255,255)
+
+
+def test_radio_marker_is_round_and_checkbox_marker_is_a_centered_cross(source,tmp_path):
+    doc=load_document(source)
+    doc.fields=[
+        Field.make('exclusive',0,[60,590,76,606],kind='radio',group='exclusive',option='Yes',checked=True),
+        Field.make('agree',0,[100,590,116,606],kind='checkbox',checked=True),
+    ]
+    out=tmp_path/'markers.pdf';export_pdf(doc,out)
+    reader=PdfReader(out)
+    annotations=[ref.get_object() for ref in reader.pages[0]['/Annots']]
+    radio=next(item for item in annotations if item.get('/Parent') and str(item['/Parent'].get_object().get('/T'))=='exclusive')['/AP']['/N']['/Yes'].get_object().get_data()
+    checkbox=next(item for item in annotations if str(item.get('/T'))=='agree')['/AP']['/N']['/Yes'].get_object().get_data()
+    assert b' c ' in radio and b' l S' not in radio
+    assert b' l S' in checkbox

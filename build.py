@@ -2,6 +2,7 @@
 import argparse
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 from PIL import Image
@@ -18,8 +19,28 @@ def icon():
     image.save(ROOT/'app.ico',sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])
 
 
+def build_ui():
+    ui=ROOT/'ui'
+    lock=ui/'package-lock.json'
+    if not lock.is_file():raise FileNotFoundError('Run npm install in ui/ once to create package-lock.json.')
+    node=shutil.which('node')
+    if not node:raise FileNotFoundError('Node.js is required to build the Vite/React UI.')
+    node=Path(node).resolve()
+    npm_cli=node.parent/'node_modules'/'npm'/'bin'/'npm-cli.js'
+    if not npm_cli.is_file():
+        candidates=[Path(r'C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js')]
+        npm_cli=next((candidate for candidate in candidates if candidate.is_file()),None)
+    if not npm_cli or not Path(str(npm_cli).replace('npm-cli.js','')).parent.exists():
+        raise FileNotFoundError('Could not find the npm CLI next to Node.js.')
+    if not (ui/'node_modules'/'vite'/'bin'/'vite.js').is_file():
+        raise FileNotFoundError('Install frontend dependencies with npm ci in ui/ before building.')
+    subprocess.run([str(node),str(npm_cli),'run','build'],cwd=ui,check=True)
+    if not (ui/'dist'/'index.html').is_file():raise RuntimeError('Vite did not produce ui/dist/index.html.')
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--mode',choices=['portable','standalone','both'],default='both');args=parser.parse_args()
+    build_ui()
     icon()
     modes=['portable','standalone'] if args.mode=='both' else [args.mode]
     env=os.environ.copy();env['PYINSTALLER_CONFIG_DIR']=str(ROOT/'.build-cache')
@@ -30,7 +51,7 @@ def main():
         spec=makespec.main([str(ROOT/'main.py')],name='PDFFormStudio',onefile=mode=='standalone',console=False,
             specpath=str(ROOT/'.build'/'specs'/mode),icon_file=[str(ROOT/'app.ico')],
             datas=[(str(ROOT/'app.ico'),'.'),(str(ROOT/'assets'/'logo-wordmark.png'),'assets'),
-                   (str(ROOT/'assets'/'logo-icon.png'),'assets')],collect_all=['pypdfium2_raw'],collect_data=['pypdfium2'],
+                   (str(ROOT/'assets'/'logo-icon.png'),'assets'),(str(ROOT/'ui'/'dist'),'ui/dist')],collect_all=['pypdfium2_raw'],collect_data=['pypdfium2'],
             copy_metadata=['pypdfium2','pypdf','pdfplumber'],
             excludes=['tkinter','pytest','reportlab','numpy','pandas','scipy','matplotlib','IPython','PyQt5','PyQt6','PySide2','torch','cv2'],
             shorthand_manifest=None)

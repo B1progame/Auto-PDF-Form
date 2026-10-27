@@ -62,7 +62,7 @@ def collect_licenses() -> list[tuple[str, str, str]]:
         "",
         "## Qt for Python",
         "",
-        "The application dynamically loads PySide6/Qt runtime libraries. Qt for Python is offered under LGPLv3/GPLv3 and commercial terms; see the [official licensing overview](https://doc.qt.io/qtforpython-6/) and [Qt LGPL obligations](https://www.qt.io/development/open-source-lgpl-obligations). The Qt shared libraries and plugins remain replaceable in the portable/installed `_internal` directory. Matching Qt 6.11.2 and PySide 6.11.2 source archives are included as separate assets in the v1.0.0 GitHub release.",
+        f"The application dynamically loads PySide6/Qt runtime libraries. Qt for Python is offered under LGPLv3/GPLv3 and commercial terms; see the [official licensing overview](https://doc.qt.io/qtforpython-6/) and [Qt LGPL obligations](https://www.qt.io/development/open-source-lgpl-obligations). The Qt shared libraries and plugins remain replaceable in the portable/installed `_internal` directory. Matching Qt 6.11.2 and PySide 6.11.2 source archives are included as separate assets in the v{VERSION} GitHub release.",
         "",
         "This notice is not legal advice. Each bundled component retains its own copyright and license.",
     ]
@@ -76,7 +76,7 @@ def zip_tree(target: Path, files: list[Path], base: Path) -> None:
         for path in files:
             if path.is_dir():
                 for child in sorted(path.rglob("*")):
-                    if child.is_file() and not any(part in {"__pycache__", ".pytest_cache", ".git"} for part in child.parts):
+                    if child.is_file() and not any(part in {"__pycache__", ".pytest_cache", ".git", "node_modules", "dist"} for part in child.parts):
                         archive.write(child, child.relative_to(base))
             elif path.is_file():
                 archive.write(path, path.relative_to(base))
@@ -119,11 +119,11 @@ def main() -> None:
     portable_zip = RELEASE / "portable" / f"AutoPDFForm-Portable-{VERSION}.zip"
     zip_tree(portable_zip, [PORTABLE_APP], RELEASE / "portable")
     source_items = [
-        ROOT / "README.md", ROOT / "VERSION", ROOT / "main.py", ROOT / "editor.py",
+        ROOT / "README.md", ROOT / "VERSION", ROOT / "main.py", ROOT / "web_editor.py", ROOT / "editor.py",
         ROOT / "engine.py", ROOT / "auto_pdf_form.py", ROOT / "build.py",
         ROOT / "package_release.py", ROOT / "requirements.txt", ROOT / ".gitignore",
         ROOT / "app.ico", ROOT / "assets", ROOT / "docs", ROOT / "installer",
-        ROOT / "tests", ROOT / "LICENSES",
+        ROOT / "tests", ROOT / "LICENSES", ROOT / "ui",
     ]
     source_zip = RELEASE / "source" / f"AutoPDFForm-Source-{VERSION}.zip"
     zip_tree(source_zip, source_items, ROOT)
@@ -137,7 +137,7 @@ def main() -> None:
     release_notes = RELEASE / f"AutoPDFForm-v{VERSION}-RELEASE-NOTES.md"
     release_notes.write_text(
         f"# Auto PDF Form {VERSION}\n\n"
-        "Native Windows PDF form editor with automatic field analysis, a manual drag-and-resize canvas, searchable field categories, and a dark gray/purple interface. Includes Python and the PDF/Qt runtime.\n\n"
+        "Native Windows PDF form editor with a Vite/React interface hosted in PySide6 WebEngine, automatic field analysis, a drag-and-resize canvas, searchable field categories, and a dark gray/purple interface. Includes Python and the PDF/Qt runtime.\n\n"
         "## Downloads\n\n"
         f"- `AutoPDFForm-Setup-{VERSION}.exe` — Inno Setup installer; Start menu entry and optional desktop shortcut.\n"
         f"- `AutoPDFForm-Portable-{VERSION}.zip` — fast-launch folder build. Extract the whole folder.\n"

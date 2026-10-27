@@ -2,7 +2,7 @@
 
 This Windows build contains the Qt for Python 6.11.2 runtime. Its Qt shared libraries are dynamically loaded from the installed `PDFFormStudio/_internal` directory. They are not modified by Auto PDF Form, and there is no signature or runtime lock that prevents replacing them.
 
-The matching full Qt 6.11.2 source archive and PySide setup source archive are provided as separate assets on the [v1.0.0 GitHub release](https://github.com/B1progame/Auto-PDF-Form/releases/tag/v1.0.0):
+The matching full Qt 6.11.2 source archive and PySide setup source archive are provided as separate assets on the [v1.1.0 GitHub release](https://github.com/B1progame/Auto-PDF-Form/releases/tag/v1.1.0):
 
 - `qt-everywhere-src-6.11.2.tar.xz`
 - `pyside-setup-everywhere-src-6.11.2.tar.xz`

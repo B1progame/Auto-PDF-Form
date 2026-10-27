@@ -20,6 +20,6 @@ Auto PDF Form bundles the following runtime libraries. Their license texts inclu
 
 ## Qt for Python
 
-The application dynamically loads PySide6/Qt runtime libraries. Qt for Python is offered under LGPLv3/GPLv3 and commercial terms; see the [official licensing overview](https://doc.qt.io/qtforpython-6/) and [Qt LGPL obligations](https://www.qt.io/development/open-source-lgpl-obligations). The Qt shared libraries and plugins remain replaceable in the portable/installed `_internal` directory. Matching Qt 6.11.2 and PySide 6.11.2 source archives are included as separate assets in the v1.0.0 GitHub release.
+The application dynamically loads PySide6/Qt runtime libraries. Qt for Python is offered under LGPLv3/GPLv3 and commercial terms; see the [official licensing overview](https://doc.qt.io/qtforpython-6/) and [Qt LGPL obligations](https://www.qt.io/development/open-source-lgpl-obligations). The Qt shared libraries and plugins remain replaceable in the portable/installed `_internal` directory. Matching Qt 6.11.2 and PySide 6.11.2 source archives are included as separate assets in the v1.1.0 GitHub release.
 
 This notice is not legal advice. Each bundled component retains its own copyright and license.

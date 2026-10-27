@@ -15,3 +15,5 @@ release/licenses/
 build*.log
 package*.log
 /release/*
+ui/node_modules/
+ui/dist/
