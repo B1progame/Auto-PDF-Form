@@ -48,6 +48,8 @@ def main():
             file_menu.addSeparator();exit_action=QAction('E&xit',self);exit_action.triggered.connect(self.close);file_menu.addAction(exit_action)
             for label,callback in (('&Undo',self.view.bridge.undo),('&Redo',self.view.bridge.redo)):
                 action=QAction(label,self);action.triggered.connect(callback);edit_menu.addAction(action)
+            tools_menu=menu.addMenu('&Help');update_action=QAction('Check for updates…',self);update_action.triggered.connect(self.view.bridge.checkForUpdates);tools_menu.addAction(update_action)
+            self.view.bridge.restartRequested.connect(self.close)
             self.view.loadFinished.connect(self._loaded)
             self.view.load_ui(Path(getattr(sys,'_MEIPASS',Path(__file__).resolve().parent)))
 

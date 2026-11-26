@@ -120,7 +120,7 @@ def main() -> None:
     zip_tree(portable_zip, [PORTABLE_APP], RELEASE / "portable")
     source_items = [
         ROOT / "README.md", ROOT / "VERSION", ROOT / "main.py", ROOT / "web_editor.py", ROOT / "editor.py",
-        ROOT / "engine.py", ROOT / "auto_pdf_form.py", ROOT / "build.py",
+        ROOT / "engine.py", ROOT / "auto_pdf_form.py", ROOT / "updater.py", ROOT / "vision_assist.py", ROOT / "build.py",
         ROOT / "package_release.py", ROOT / "requirements.txt", ROOT / ".gitignore",
         ROOT / "app.ico", ROOT / "assets", ROOT / "docs", ROOT / "installer",
         ROOT / "tests", ROOT / "LICENSES", ROOT / "ui",

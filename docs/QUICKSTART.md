@@ -2,9 +2,13 @@
 
 ## Install
 
-Run `AutoPDFForm-Setup-1.1.0.exe` and choose whether to add a desktop shortcut. The installer adds a Start menu entry and includes Python, Qt, the PDF runtime, and Microsoft's signed x64 Visual C++ runtime installer; Python does not need to be installed separately. Windows may ask for administrator approval to install the Microsoft runtime if it is missing. Uninstall from Windows Settings → Apps.
+Run `AutoPDFForm-Setup-1.2.0.exe` and choose whether to add a desktop shortcut. The installer adds a Start menu entry and includes Python, Qt, the PDF runtime, and Microsoft's signed x64 Visual C++ runtime installer; Python does not need to be installed separately. Windows may ask for administrator approval to install the Microsoft runtime if it is missing. Uninstall from Windows Settings → Apps.
 
-For the fastest startup without installation, extract `AutoPDFForm-Portable-1.1.0.zip` and run `PDFFormStudio.exe` inside its folder. Keep the `_internal` folder next to it. The portable and single-file builds require the x64 Microsoft Visual C++ v14 runtime; install the official `vc_redist.x64.exe` included as a separate release download if Windows does not already have it.
+For the fastest startup without installation, extract `AutoPDFForm-Portable-1.2.0.zip` and run `PDFFormStudio.exe` inside its folder. Keep the `_internal` folder next to it. The portable and single-file builds require the x64 Microsoft Visual C++ v14 runtime; install the official `vc_redist.x64.exe` included as a separate release download if Windows does not already have it.
+
+## Updates
+
+In an installed Windows copy, open **Help & updates** or Help → **Check for updates…**. The app checks the latest stable GitHub release, verifies the installer SHA-256, asks before installation, saves the project first, closes, installs, and reopens. Portable and standalone builds can check releases but cannot replace their own files; install the Inno Setup version to use automatic installation.
 
 ## Open and organize a PDF
 

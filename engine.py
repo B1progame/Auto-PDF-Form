@@ -25,7 +25,7 @@ from pypdf.generic import (
     DictionaryObject, FloatObject, NameObject, NumberObject, TextStringObject,
 )
 
-VERSION = '1.1.0'
+VERSION = '1.2.0'
 PDFIUM_LOCK = threading.Lock()  # PDFium is not safe for concurrent calls.
 FONT_ASCENT = {'Helvetica': 718, 'Times-Roman': 683, 'Courier': 629}
 
@@ -50,11 +50,13 @@ class Field:
     group: str = ''
     option: str = 'Yes'
     checked: bool = False
+    marker_style: str = 'default'
     tooltip: str = ''
     choices: list[str] = field(default_factory=list)
     alignment: int = 0
     locked: bool = False
     linked_fields: list[str] = field(default_factory=list)
+    link_rules: dict[str, dict[str, str]] = field(default_factory=dict)
 
     @classmethod
     def make(cls, name, page, rect, **kwargs):
@@ -211,7 +213,7 @@ def load_document(path: str | Path) -> Document:
                 border_width=float(bs.get('/W', 0)), multiline=bool(flags & 4096),
                 max_length=int(inherited(obj, '/MaxLen', 0)),
                 group=name if kind == 'radio' else '', option=option,
-                checked=state not in ('Off', ''), tooltip=str(inherited(obj, '/TU', name)), choices=choices,alignment=int(inherited(obj,'/Q',0)),
+                checked=state not in ('Off', ''), marker_style=str(obj.get('/FStudioMarker', '/default')).lstrip('/'), tooltip=str(inherited(obj, '/TU', name)), choices=choices,alignment=int(inherited(obj,'/Q',0)),
             ))
     return Document(str(path), digest(path), sizes, fields, warnings, list(dict.fromkeys(unsupported)))
 
@@ -495,6 +497,9 @@ def validate_document(doc):
         if not all(math.isfinite(v) for v in f.rect) or x1-x0<3 or y1-y0<3 or x0<-.1 or y0<-.1 or x1>pw+.1 or y1>ph+.1:
             raise ValueError(f'{f.name}: field is outside its page or too small.')
         if not 1<=f.font_size<=100:raise ValueError(f'{f.name}: font size must be 1-100 points.')
+        allowed_markers = {'checkbox': {'default', 'x', 'check', 'fill', 'none'}, 'radio': {'default', 'dot', 'fill', 'none'}}
+        if f.kind in allowed_markers and f.marker_style not in allowed_markers[f.kind]:
+            raise ValueError(f'{f.name}: unsupported {f.kind} answer mark style.')
         if f.max_length and len(f.value)>f.max_length:raise ValueError(f'{f.name}: value exceeds its character limit.')
         for color in (f.text_color,f.background,f.border_color,f.highlight):
             if color is not None and not re.fullmatch(r'#[0-9a-fA-F]{6}',color):raise ValueError(f'{f.name}: invalid color {color}.')
@@ -503,10 +508,24 @@ def validate_document(doc):
     field_keys={f.key:f for f in doc.fields}
     for f in doc.fields:
         if not isinstance(f.linked_fields,list) or len(set(f.linked_fields))!=len(f.linked_fields):raise ValueError(f'{f.name}: invalid linked fields.')
+        if not isinstance(f.link_rules,dict):raise ValueError(f'{f.name}: invalid linked field rules.')
+        if set(f.link_rules)-set(f.linked_fields):raise ValueError(f'{f.name}: a linked-field rule refers to a target that is not linked.')
         for key in f.linked_fields:
             linked=field_keys.get(key)
             if linked is None or linked.key==f.key or linked.kind not in ('text','choice'):
                 raise ValueError(f'{f.name}: links must point to a different text field or dropdown in this PDF.')
+            rule=f.link_rules.get(key,{})
+            if not isinstance(rule,dict) or rule.get('transform','copy') not in {'copy','uppercase','lowercase','trim','date_part','prefix_suffix'}:
+                raise ValueError(f'{f.name}: unsupported linked-field transform.')
+            if rule.get('condition','always') not in {'always','source_non_empty','target_empty'}:
+                raise ValueError(f'{f.name}: unsupported linked-field condition.')
+            if rule.get('transform')=='date_part' and rule.get('date_part','day') not in {'day','month','year'}:
+                raise ValueError(f'{f.name}: date links need a day, month, or year component.')
+            if rule.get('transform')=='prefix_suffix':
+                for part in ('prefix','suffix'):
+                    value=rule.get(part,'')
+                    if not isinstance(value,str) or len(value)>120:
+                        raise ValueError(f'{f.name}: link prefixes and suffixes must be 120 characters or fewer.')
     rewrite_keys=set()
     for r in doc.rewrites:
         if r.key in rewrite_keys:raise ValueError('Duplicate rewrite marker key.')
@@ -543,12 +562,22 @@ def _button_appearance(writer,f,on):
         mark=min(width,height);cx,cy=width/2,height/2
         color=' '.join(map(str,rgb(f.text_color)))
         if f.kind=='radio':
-            radius=mark*.22
-            k=radius*.55228475
-            s.append(f'{color} rg {cx+radius} {cy} m {cx+radius} {cy+k} {cx+k} {cy+radius} {cx} {cy+radius} c {cx-k} {cy+radius} {cx-radius} {cy+k} {cx-radius} {cy} c {cx-radius} {cy-k} {cx-k} {cy-radius} {cx} {cy-radius} c {cx+k} {cy-radius} {cx+radius} {cy-k} {cx+radius} {cy} c f')
+            style=f.marker_style
+            if style in ('none',):
+                pass
+            else:
+                radius=mark*(.43 if style=='fill' else .22)
+                k=radius*.55228475
+                s.append(f'{color} rg {cx+radius} {cy} m {cx+radius} {cy+k} {cx+k} {cy+radius} {cx} {cy+radius} c {cx-k} {cy+radius} {cx-radius} {cy+k} {cx-radius} {cy} c {cx-radius} {cy-k} {cx-k} {cy-radius} {cx} {cy-radius} c {cx+k} {cy-radius} {cx+radius} {cy-k} {cx+radius} {cy} c f')
         else:
-            inset=mark*.28;stroke=max(.7,min(1.6,mark*.12))
-            s.append(f'{color} RG {stroke} w 1 J {inset} {inset} m {width-inset} {height-inset} l S {inset} {height-inset} m {width-inset} {inset} l S')
+            style=f.marker_style
+            if style in ('none',):
+                pass
+            elif style=='fill':
+                inset=mark*.14;s.append(f'{color} rg {inset} {inset} {width-2*inset} {height-2*inset} re f')
+            else:
+                inset=mark*.28;stroke=max(.7,min(1.6,mark*.12))
+                s.append(f'{color} RG {stroke} w 1 J ' + (f'{inset} {cy} m {cx-mark*.08} {inset} l {width-inset} {height-inset} l S' if style=='check' else f'{inset} {inset} m {width-inset} {height-inset} l {inset} {height-inset} m {width-inset} {inset} l S'))
     s.append('Q');ap=DecodedStreamObject();ap.set_data('\n'.join(s).encode('ascii'))
     ap.update({NameObject('/Type'):NameObject('/XObject'),NameObject('/Subtype'):NameObject('/Form'),NameObject('/BBox'):_arr([0,0,width,height]),NameObject('/Resources'):DictionaryObject()})
     return writer._add_object(ap)
@@ -621,6 +650,8 @@ def export_pdf(document: Document, output: str | Path, sample=False):
             ref=writer._add_object(parent);radio_parents[f.group]=ref;roots.append(ref);expected[f.group]='/'+active
         page=writer.pages[f.page]
         obj=DictionaryObject({NameObject('/Type'):NameObject('/Annot'),NameObject('/Subtype'):NameObject('/Widget'),NameObject('/Rect'):_arr(f.rect),NameObject('/F'):NumberObject(4),NameObject('/P'):page.indirect_reference,NameObject('/TU'):TextStringObject(f.tooltip or f.name)})
+        if f.kind in ('checkbox', 'radio'):
+            obj[NameObject('/FStudioMarker')]=NameObject('/'+f.marker_style)
         mk=DictionaryObject({NameObject('/BC'):_arr(rgb(f.border_color))})
         if f.background:mk[NameObject('/BG')]=_arr(rgb(f.background))
         obj[NameObject('/MK')]=mk

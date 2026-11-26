@@ -6,7 +6,7 @@ A local Windows PDF form editor with a Vite/React interface hosted in a PySide6 
 
 ## Start
 
-- **Fast startup:** install `release/installer/AutoPDFForm-Setup-1.1.0.exe`, or open `release/portable/PDFFormStudio/PDFFormStudio.exe`. Keep its `_internal` folder beside it. The portable build needs the x64 Microsoft Visual C++ v14 runtime, available as `vc_redist.x64.exe` in the GitHub release.
+- **Fast startup:** install `release/installer/AutoPDFForm-Setup-1.2.0.exe`, or open `release/portable/PDFFormStudio/PDFFormStudio.exe`. Keep its `_internal` folder beside it. The portable build needs the x64 Microsoft Visual C++ v14 runtime, available as `vc_redist.x64.exe` in the GitHub release.
 - **Single executable:** open `release/standalone/PDFFormStudio.exe`. This extracts its bundled runtime into a temporary directory when starting, so it starts more slowly than the portable-folder build. It also needs the x64 Microsoft Visual C++ v14 runtime.
 - **Python source:** `python main.py`.
 
@@ -56,12 +56,14 @@ The script writes an interactive PDF, an editable project and a JSON report. `--
 
 The release folder is grouped by download type:
 
-- `release/installer/AutoPDFForm-Setup-1.1.0.exe` — Inno Setup installer with a Start menu shortcut, optional desktop shortcut and Windows uninstaller.
-- `release/portable/AutoPDFForm-Portable-1.1.0.zip` — fast startup; extract the complete folder and keep `_internal` beside the executable.
+- `release/installer/AutoPDFForm-Setup-1.2.0.exe` — Inno Setup installer with a Start menu shortcut, optional desktop shortcut and Windows uninstaller.
+- `release/portable/AutoPDFForm-Portable-1.2.0.zip` — fast startup; extract the complete folder and keep `_internal` beside the executable.
 - `release/standalone/PDFFormStudio.exe` — one-file build that extracts its embedded runtime at launch.
 - `vc_redist.x64.exe` — Microsoft's signed x64 Visual C++ runtime installer for portable and single-file builds; the Inno installer already includes it.
-- `release/source/AutoPDFForm-Source-1.1.0.zip` — source code, tests, docs and build scripts.
+- `release/source/AutoPDFForm-Source-1.2.0.zip` — source code, tests, docs and build scripts.
 - The GitHub release also includes `qt-everywhere-src-6.11.2.tar.xz` and `pyside-setup-everywhere-src-6.11.2.tar.xz`, with checksums for the bundled LGPL-licensed runtime.
+
+The installed Windows app includes **Help & updates**: it checks stable GitHub releases, verifies installer checksums, and installs/restarts only after your project is saved. Portable and standalone copies can check but cannot self-replace.
 
 Each release includes a SHA-256 checksum file. The logo comes from the supplied Auto PDF Form artwork. Drag-and-drop, page navigation, field-name search and type filters are built into the editor.
 

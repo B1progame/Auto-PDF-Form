@@ -6,6 +6,7 @@ import copy
 import json
 import re
 import tempfile
+import threading
 import uuid
 from dataclasses import asdict
 from pathlib import Path
@@ -19,6 +20,7 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 
 import engine
 from engine import Document, Field, Rewrite
+import updater
 
 
 class WorkerSignals(QObject):
@@ -47,6 +49,7 @@ class Bridge(QObject):
     """Only exposes document operations required by the bundled local UI."""
 
     event = Signal(str)
+    restartRequested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -67,6 +70,12 @@ class Bridge(QObject):
         self.running = {}
         self.images: dict[tuple[str, int, bool], str] = {}
         self.render_tokens: dict[str, str] = {}
+        self.update_release = None
+        self.update_cancel: threading.Event | None = None
+        self.update_task_active = False
+        self.update_request_id: str | None = None
+        self.update_installer: Path | None = None
+        self.update_installing = False
 
     def _emit(self, kind: str, **payload):
         self.event.emit(json.dumps({"type": kind, **payload}, ensure_ascii=False))
@@ -97,10 +106,33 @@ class Bridge(QObject):
             "canUndo": bool(self.history),
             "canRedo": bool(self.redo_history),
             "projectPath": self.project_path,
+            "appVersion": engine.VERSION,
         }
 
     def _emit_state(self):
         self._emit("state", state=self.state())
+
+    @staticmethod
+    def _transform_link_value(value: str, rule: dict, source_name: str) -> str:
+        transform = rule.get("transform", "copy")
+        if transform == "uppercase":
+            return value.upper()
+        if transform == "lowercase":
+            return value.lower()
+        if transform == "trim":
+            return value.strip()
+        if transform == "prefix_suffix":
+            return str(rule.get("prefix", "")) + value + str(rule.get("suffix", ""))
+        if transform == "date_part":
+            match = re.fullmatch(r"\s*(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})\s*", value)
+            if not match:
+                if not value.strip():
+                    return ""
+                raise ValueError(f"{source_name}: enter a date as day/month/year before copying a date part.")
+            day, month, year = match.groups()
+            part = rule.get("date_part", "day")
+            return {"day": day.zfill(2), "month": month.zfill(2), "year": year}[part]
+        return value
 
     def _start(self, request_id, fn, callback, *, blocks_ui=True):
         if blocks_ui and self.busy:
@@ -131,6 +163,10 @@ class Bridge(QObject):
     def _finished(self, request_id):
         entry = self.callbacks.pop(request_id, None)
         self.running.pop(request_id, None)
+        if request_id == self.update_request_id:
+            self.update_task_active = False
+            self.update_cancel = None
+            self.update_request_id = None
         if entry and entry[1]:
             self.busy = False
         self._emit_state()
@@ -138,6 +174,121 @@ class Bridge(QObject):
     @Slot(result=str)
     def getState(self):
         return json.dumps(self.state(), ensure_ascii=False)
+
+    @Slot(result=str)
+    def checkForUpdates(self):
+        if self.update_task_active:
+            return "busy"
+        self.update_task_active = True
+        self._emit("update", status="checking", currentVersion=engine.VERSION)
+        request_id = uuid.uuid4().hex
+        self.update_request_id = request_id
+
+        def check():
+            try:
+                return updater.check_latest(engine.VERSION)
+            except updater.UpdateError as exc:
+                return {"error": str(exc)}
+
+        def ready(result):
+            if result.get("error"):
+                self._emit("update", status="error", currentVersion=engine.VERSION, error=result["error"])
+                return
+            self.update_release = result if result.get("available") else None
+            self._emit("update", status="available" if result.get("available") else "current",
+                       currentVersion=engine.VERSION, latestVersion=result["latestVersion"],
+                       releaseUrl=result["releaseUrl"], releaseNotes=result["releaseNotes"],
+                       publishedAt=result.get("publishedAt"))
+
+        self.callbacks[request_id] = (ready, False)
+        self._start(request_id, check, ready, blocks_ui=False)
+        return "queued"
+
+    @Slot(result=str)
+    def downloadUpdate(self):
+        if self.update_task_active:
+            return "busy"
+        if not self.update_release:
+            return "no update available"
+        self.update_task_active = True
+        self.update_cancel = threading.Event()
+        version = self.update_release["latestVersion"]
+        folder = updater.default_update_dir()
+        target = folder / f"AutoPDFForm-Setup-{version}.exe"
+        self._emit("update", status="downloading", currentVersion=engine.VERSION,
+                   latestVersion=version, assetName=target.name, bytesDownloaded=0,
+                   totalBytes=int(self.update_release["installer"].get("size") or 0), progress=0)
+        request_id = uuid.uuid4().hex
+        self.update_request_id = request_id
+
+        def progress(received, total):
+            self._emit("update", status="downloading", currentVersion=engine.VERSION,
+                       latestVersion=version, assetName=target.name, bytesDownloaded=received,
+                       totalBytes=total, progress=round(received * 100 / total, 1) if total else None)
+
+        def download():
+            try:
+                return {"path": str(updater.download_installer(self.update_release, target,
+                        progress=progress, cancel=self.update_cancel))}
+            except updater.UpdateCancelled as exc:
+                return {"cancelled": str(exc)}
+            except updater.UpdateError as exc:
+                return {"error": str(exc)}
+
+        def ready(result):
+            if result.get("path"):
+                self.update_installer = Path(result["path"])
+                self._emit("update", status="downloaded", currentVersion=engine.VERSION,
+                           latestVersion=version, assetName=target.name, downloadPath=result["path"],
+                           progress=100, totalBytes=target.stat().st_size, bytesDownloaded=target.stat().st_size)
+            elif result.get("cancelled"):
+                self._emit("update", status="cancelled", latestVersion=version, error=result["cancelled"])
+            else:
+                self._emit("update", status="error", latestVersion=version, error=result.get("error", "Update download failed."))
+
+        self.callbacks[request_id] = (ready, False)
+        self._start(request_id, download, ready, blocks_ui=False)
+        return "queued"
+
+    @Slot(result=str)
+    def cancelUpdate(self):
+        if self.update_cancel:
+            self.update_cancel.set()
+            return "cancelling"
+        return "nothing to cancel"
+
+    @Slot(result=str)
+    def installUpdate(self):
+        if not self.update_installer or not self.update_installer.is_file():
+            return "Download and verify the update first."
+        if self.update_task_active or self.busy:
+            return "Wait for current work to finish before updating."
+        try:
+            paths = updater.installed_app_info()
+        except updater.UpdateError as exc:
+            self._emit("update", status="error", error=str(exc))
+            return str(exc)
+        if self.dirty:
+            answer = QMessageBox.question(
+                None, "Save before updating?",
+                "Save the current PDF Form Studio project before closing the app to install the update?",
+                QMessageBox.Save | QMessageBox.Cancel, QMessageBox.Save,
+            )
+            if answer != QMessageBox.Save:
+                return "cancelled"
+            if self.saveProject() != "ok":
+                return "The project was not saved; the update has not started."
+        try:
+            helper = updater.start_installer_handoff(
+                self.update_installer, app_exe=paths["appExe"], install_dir=paths["installDir"]
+            )
+        except updater.UpdateError as exc:
+            self._emit("update", status="error", error=str(exc))
+            return str(exc)
+        self.update_installing = True
+        self._emit("update", status="installing", latestVersion=self.update_release["latestVersion"], helper=str(helper))
+        self.restartRequested.emit()
+        return "installing"
 
     def open_path(self, path):
         if self.busy:
@@ -276,7 +427,8 @@ class Bridge(QObject):
                 "name", "tooltip", "rect", "value", "font_size", "font", "text_color",
                 "background", "border_color", "border_width", "highlight", "multiline",
                 "max_length", "group", "option", "checked", "choices", "alignment",
-                "locked", "linked_fields",
+                "locked", "linked_fields", "marker_style",
+                "link_rules",
             }
             if not isinstance(patch, dict) or not set(patch).issubset(allowed):
                 raise ValueError("Invalid field update")
@@ -299,6 +451,9 @@ class Bridge(QObject):
                     if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
                         raise ValueError("Linked field list is invalid.")
                     value = list(dict.fromkeys(value))
+                    target.link_rules = {key: rule for key, rule in target.link_rules.items() if key in value}
+                if prop == "link_rules" and not isinstance(value, dict):
+                    raise ValueError("Linked field rules must be a mapping.")
                 setattr(target, prop, value)
             if target.kind == "radio":
                 if not target.group.strip():
@@ -310,7 +465,7 @@ class Bridge(QObject):
                             field.checked = False
             if target.kind == "choice":
                 target.choices = [str(v) for v in target.choices if str(v).strip()]
-            if "value" in patch:
+            if any(prop in patch for prop in ("value", "linked_fields", "link_rules")):
                 by_key = {field.key: field for field in self.document.fields}
                 queue = [target]
                 visited = {target.key}
@@ -322,7 +477,18 @@ class Bridge(QObject):
                             raise ValueError("A linked target must be another text field or dropdown.")
                         if linked.key in visited:
                             continue
-                        linked.value = source.value
+                        rule=source.link_rules.get(linked_key,{})
+                        condition=rule.get("condition","always")
+                        if condition=="source_non_empty" and not source.value:
+                            visited.add(linked.key)
+                            continue
+                        if condition=="target_empty" and linked.value:
+                            visited.add(linked.key)
+                            continue
+                        linked_value=self._transform_link_value(source.value,rule,source.name)
+                        if linked.kind=="choice" and linked_value and linked_value not in linked.choices:
+                            raise ValueError(f"{linked.name}: linked value {linked_value!r} is not one of its dropdown options.")
+                        linked.value = linked_value
                         visited.add(linked.key)
                         queue.append(linked)
             engine.validate_document(self.document)

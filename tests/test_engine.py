@@ -7,7 +7,7 @@ from pypdf import PdfReader
 from pypdf.generic import ContentStream
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from engine import Field,Rewrite,load_document,analyze,export_pdf,baseline_rect,render_page,save_project,load_project,transfer_template
+from engine import Field,Rewrite,load_document,analyze,export_pdf,baseline_rect,render_page,save_project,load_project,transfer_template,validate_document
 
 
 @pytest.fixture
@@ -198,3 +198,42 @@ def test_radio_marker_is_round_and_checkbox_marker_is_a_centered_cross(source,tm
     checkbox=next(item for item in annotations if str(item.get('/T'))=='agree')['/AP']['/N']['/Yes'].get_object().get_data()
     assert b' c ' in radio and b' l S' not in radio
     assert b' l S' in checkbox
+
+
+def test_checkbox_and_radio_marker_styles_export_and_roundtrip(source,tmp_path):
+    doc=load_document(source)
+    doc.fields=[
+        Field.make('mark_x',0,[30,590,46,606],kind='checkbox',checked=True,marker_style='x'),
+        Field.make('mark_check',0,[55,590,71,606],kind='checkbox',checked=True,marker_style='check'),
+        Field.make('mark_fill',0,[80,590,96,606],kind='checkbox',checked=True,marker_style='fill'),
+        Field.make('mark_none',0,[105,590,121,606],kind='checkbox',checked=True,marker_style='none'),
+        Field.make('radio_dot',0,[130,590,146,606],kind='radio',group='radio_dot',checked=True,marker_style='dot'),
+        Field.make('radio_fill',0,[155,590,171,606],kind='radio',group='radio_fill',checked=True,marker_style='fill'),
+        Field.make('radio_none',0,[180,590,196,606],kind='radio',group='radio_none',checked=True,marker_style='none'),
+    ]
+    output=tmp_path/'marker-styles.pdf'
+    export_pdf(doc,output)
+    reopened=load_document(output)
+    styles={field.name:field.marker_style for field in reopened.fields}
+    assert styles=={field.name:field.marker_style for field in doc.fields}
+    annotations={}
+    for ref in PdfReader(output).pages[0]['/Annots']:
+        item=ref.get_object();parent=item.get('/Parent')
+        name=str(parent.get_object().get('/T')) if parent else str(item.get('/T',''))
+        if name:annotations[name]=item
+    def appearance(name):
+        return annotations[name]['/AP']['/N']['/Yes'].get_object().get_data()
+    assert appearance('mark_x').count(b' l S')==1
+    assert b'4.48 4.48 m' in appearance('mark_x') and b'4.48 11.52 m' in appearance('mark_x')
+    assert appearance('mark_check').count(b' l S')==1
+    assert b' re f' in appearance('mark_fill')
+    assert b' l S' not in appearance('mark_none') and b' re f' not in appearance('mark_none')
+    assert b' c f' in appearance('radio_dot') and b' c f' in appearance('radio_fill')
+    assert b' c f' not in appearance('radio_none')
+
+
+def test_marker_style_is_validated_by_widget_kind(source):
+    doc=load_document(source)
+    doc.fields=[Field.make('bad_marker',0,[20,20,36,36],kind='checkbox',marker_style='dot')]
+    with pytest.raises(ValueError,match='unsupported checkbox answer mark'):
+        validate_document(doc)

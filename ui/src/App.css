@@ -11,6 +11,58 @@
 @media (max-width:1200px){.workspace{grid-template-columns:224px minmax(360px,1fr) 280px}.brand{min-width:225px}.brand img{width:135px}.topbar{gap:15px;padding:0 15px}.workspace.leftCollapsed{grid-template-columns:0 minmax(360px,1fr) 280px}}
 @media (max-height:720px){.workspace{grid-template-columns:238px minmax(360px,1fr) 290px}.inspectorScroll{padding-top:10px}.inspectorSection{gap:10px}.welcomeSteps{margin-top:32px}}
 
+/* Resizable work areas: the divider stays distinct from canvas gestures. */
+.workspace{grid-template-columns:var(--left-width,254px) 8px minmax(360px,1fr) 8px var(--right-width,306px)}
+.workspace.leftCollapsed{grid-template-columns:minmax(360px,1fr) 8px var(--right-width,306px)}
+.workspace.rightCollapsed{grid-template-columns:var(--left-width,254px) 8px minmax(360px,1fr)}
+.workspace.leftCollapsed.rightCollapsed{grid-template-columns:minmax(360px,1fr)}
+.panelSplitter{position:relative;z-index:8;min-width:8px;cursor:col-resize;touch-action:none;background:#1e1d23;border-right:1px solid #302d37;border-left:1px solid #302d37;outline:none}
+.panelSplitter::after{content:"";position:absolute;top:calc(50% - 20px);left:2px;width:2px;height:40px;border-radius:2px;background:#544c5f;opacity:.65}
+.panelSplitter:hover,.panelSplitter:focus-visible{background:#332b3d;border-color:#75599a}
+.panelSplitter:hover::after,.panelSplitter:focus-visible::after{background:#c3a3f1;opacity:1}
+.canvasScroll{overscroll-behavior:contain;scrollbar-gutter:stable}
+.pageFrame{scroll-margin:0}
+.revealInspector{display:none}
+.rightCollapsed .revealInspector{display:inline-flex}
+.leftCollapsed .revealRail{display:inline-flex}
+.modeSwitch{flex:none}
+.modeSwitch button{white-space:nowrap}
+.emptyActions{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:14px;width:min(100%,250px)}
+.emptyActions .toolbarButton{justify-content:flex-start;min-width:0;padding:0 8px;font-size:12px}
+.answerMark{position:absolute;z-index:3;inset:0;display:grid;place-items:center;pointer-events:none;color:var(--field-text,#17212f)}
+.answerMark>svg{display:block;width:82%;height:82%;stroke-width:2.7;overflow:visible}
+.answerMark .markFill{display:block;width:78%;height:78%;border-radius:2px;background:currentColor}
+.answerMark.radio .markFill{border-radius:50%}
+.answerMark .markDot{display:block;width:48%;height:48%;border-radius:50%;background:currentColor}
+.fillChoice{border:0!important;background:transparent!important;box-shadow:none!important;outline:0!important}
+.fillChoice>span.fillMark{position:relative;width:min(76%,24px);height:min(76%,24px);min-width:14px;min-height:14px;display:grid;place-items:center;border:1.5px solid #35313c;border-radius:2px;background:#fff;color:#302339;line-height:1}
+.fillChoice.radio>span.fillMark{border-radius:50%}
+.fillChoice>span.fillMark.checked{border-color:#64458a}
+.fillChoice .fillMark>svg{display:block;width:78%;height:78%;stroke-width:2.8;overflow:visible}
+.fillChoice .fillMark .markFill{display:block;position:absolute;inset:1px;border-radius:1px;background:#64458a}
+.fillChoice.radio .fillMark .markFill{border-radius:50%}
+.fillChoice .fillMark .markDot{display:block;width:52%;height:52%;border-radius:50%;background:#64458a}
+.modalBackdrop{position:absolute;z-index:60;inset:0;display:grid;place-items:center;padding:24px;background:#08070bc9;backdrop-filter:blur(3px)}
+.updateDialog{width:min(540px,100%);max-height:min(760px,calc(100% - 24px));overflow:auto;padding:22px;border:1px solid #554b63;border-radius:12px;background:#222127;box-shadow:0 24px 90px #000b;color:#e8e5ef}
+.updateDialogHeader{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding-bottom:13px;border-bottom:1px solid #38343f}
+.updateDialogHeader h2{margin:5px 0 0;color:#f1edf5;font-size:19px;font-weight:650}
+.updateStatus{margin:18px 0 8px;color:#d7d0df;font-size:14px;line-height:1.55}
+.releaseLink{display:inline-block;margin:3px 0 9px;color:#cdb4f3;font-size:12px}
+.downloadProgress{display:grid;gap:7px;margin:17px 0}
+.downloadProgress progress{width:100%;height:10px;accent-color:#b99af1}
+.progressMeta{display:flex;justify-content:space-between;color:#bfb8c8;font-size:12px}
+.releaseNotes{max-height:220px;overflow:auto;padding:12px;border:1px solid #3c3843;border-radius:6px;background:#19181e;color:#c7c0cd;font:12px/1.55 ui-monospace,Consolas,monospace;white-space:pre-wrap}
+.updateActions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+.helpNotes{display:grid;gap:7px;margin-top:20px;padding-top:14px;border-top:1px solid #38343f;color:#a9a2af;font-size:12px;line-height:1.5}
+.helpNotes strong{color:#e2dce8;font-size:13px}
+.helpUpdateButton{font-size:12px}
+.linkRuleCard{display:grid;gap:6px;padding:4px;border:1px solid #34313b;border-radius:6px;background:#1d1c22}
+.linkRuleControls{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:4px}
+.linkRuleControls .formField{gap:4px}
+.linkRuleControls .formField>span{font-size:11px}
+@media (max-width:1180px){.workspace{grid-template-columns:minmax(190px,var(--left-width,230px)) 8px minmax(340px,1fr) 8px minmax(250px,var(--right-width,280px))}.workspace.leftCollapsed{grid-template-columns:minmax(340px,1fr) 8px minmax(250px,var(--right-width,280px))}.workspace.rightCollapsed{grid-template-columns:minmax(190px,var(--left-width,230px)) 8px minmax(340px,1fr)}}
+@media (max-width:940px){.workspace{grid-template-columns:minmax(0,1fr) 0 minmax(260px,var(--right-width,280px))}.workspace:not(.leftCollapsed) .leftRail,.workspace:not(.leftCollapsed)>.panelSplitter.left{display:none}.workspace.leftCollapsed{grid-template-columns:minmax(0,1fr) 0 minmax(260px,var(--right-width,280px))}.workspace.rightCollapsed{grid-template-columns:minmax(0,1fr)}.commandBar{overflow-x:auto}.topbar{gap:8px}.brand{min-width:0}.documentName{display:none}}
+
 /* Keep corrections opaque and contained; distinguish radio dots from checkbox X marks. */
 .rewriteField,.rewriteField.selected{display:flex;align-items:center;overflow:hidden;padding:2px 5px;background:var(--field-bg,#fff);color:var(--field-text,#17212f);font-family:Arial,sans-serif;font-size:var(--field-font,16px);line-height:1.15;white-space:pre-wrap;overflow-wrap:anywhere;user-select:none}
 .rewriteField.selected{outline:2px solid var(--field-highlight,#b99af1);outline-offset:0}
